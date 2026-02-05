@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スタミナ回復計算機</title>
+    <style>
+        /* 基本設定 */
+        body {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px 0;
+        }
+
+        .container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        /* 時計 */
+        .current-time-box { margin-bottom: 1.5rem; }
+        .current-time-label { font-size: 0.9rem; color: #666; margin-bottom: 0.5rem; }
+        .current-time-display { font-size: 2.5rem; font-weight: bold; color: #2c3e50; font-variant-numeric: tabular-nums; }
+
+        /* 入力エリア */
+        .input-section { margin-bottom: 1.5rem; }
+        .input-label { display: block; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.95rem; color: #555; }
+        
+        .picker-container, .number-input-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        select, input[type="number"] {
+            padding: 10px;
+            font-size: 1.2rem;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            outline: none;
+            text-align: center;
+            width: 80px;
+        }
+        
+        input[type="number"] { background-color: #fafafa; }
+        input[type="number"]:focus, select:focus { border-color: #007bff; background-color: #fff; }
+
+        /* 計算ボタン */
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 14px;
+            font-size: 1rem;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button:hover { background-color: #0056b3; }
+        button:active { transform: scale(0.98); }
+
+        /* 結果表示 */
+        #result {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #eee;
+            display: none;
+        }
+        .result-item { margin-bottom: 1rem; }
+        .result-label { font-size: 0.85rem; color: #888; margin-bottom: 0.2rem; }
+        .result-value { font-size: 1.6rem; font-weight: bold; color: #2c3e50; }
+        .highlight-red { color: #e74c3c; }
+        
+        .unit-text { font-size: 1rem; font-weight: normal; margin-left: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="current-time-box">
+            <div class="current-time-label">現在の時刻</div>
+            <div id="clock" class="current-time-display">--:--:--</div>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+        <div class="input-section">
+            <label class="input-label">基準にする時刻</label>
+            <div class="picker-container">
+                <select id="select-hour"></select>
+                <span>:</span>
+                <select id="select-minute"></select>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 15px; justify-content: space-between;">
+            <div class="input-section" style="flex: 1;">
+                <label class="input-label">目標値(上限)</label>
+                <input type="number" id="target-value" value="50" min="0">
+            </div>
+            
+            <div class="input-section" style="flex: 1;">
+                <label class="input-label">1回復の時間</label>
+                <div style="display:flex; align-items:center; justify-content:center;">
+                    <input type="number" id="recovery-interval" value="15" min="1">
+                    <span class="unit-text">分</span>
+                </div>
+            </div>
+        </div>
+
+        <button id="calc-btn">計算する</button>
+
+        <div id="result">
+            <div class="result-item">
+                <div class="result-label">翌0時までの残り時間</div>
+                <div class="result-value" id="time-remaining">--時間 --分</div>
+            </div>
+            
+            <div class="result-item">
+                <div class="result-label">回復予定数</div>
+                <div class="result-value" id="slots-remaining">--</div>
+            </div>
+
+            <div class="result-item">
+                <div class="result-label">現在の調整目安</div>
+                <div class="result-value highlight-red" id="adjustment-target">--</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 画面の読み込みが完了してから実行する設定
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            // --- 1. 時計の初期化と更新 ---
+            const clockElement = document.getElementById('clock');
+            
+            function updateClock() {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const seconds = String(now.getSeconds()).padStart(2, '0');
+                if(clockElement) {
+                    clockElement.textContent = `${hours}:${minutes}:${seconds}`;
+                }
+            }
+            setInterval(updateClock, 1000);
+            updateClock(); // 即時実行
+
+            // --- 2. ピッカー初期化 ---
+            const hourSelect = document.getElementById('select-hour');
+            const minuteSelect = document.getElementById('select-minute');
+
+            // 時間 (0-23)
+            for (let i = 0; i < 24; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = String(i).padStart(2, '0');
+                hourSelect.appendChild(option);
+            }
+
+            // 分 (0, 15, 30, 45)
+            [0, 15, 30, 45].forEach(min => {
+                const option = document.createElement('option');
+                option.value = min;
+                option.textContent = String(min).padStart(2, '0');
+                minuteSelect.appendChild(option);
+            });
+
+            // 現在時刻に近い値をセット
+            const now = new Date();
+            hourSelect.value = now.getHours();
+            let currentMin = now.getMinutes();
+            let targetMin = 0;
+            if (currentMin < 15) targetMin = 0;
+            else if (currentMin < 30) targetMin = 15;
+            else if (currentMin < 45) targetMin = 30;
+            else targetMin = 45;
+            minuteSelect.value = targetMin;
+
+            // --- 3. 計算ボタンのイベント設定 ---
+            const calcBtn = document.getElementById('calc-btn');
+            calcBtn.addEventListener('click', calculateRemaining);
+        });
+
+        // --- 4. 計算ロジック ---
+        function calculateRemaining() {
+            const hourSelect = document.getElementById('select-hour');
+            const minuteSelect = document.getElementById('select-minute');
+            
+            const selectedHour = parseInt(hourSelect.value, 10);
+            const selectedMinute = parseInt(minuteSelect.value, 10);
+            
+            // 入力値の取得
+            const targetVal = parseFloat(document.getElementById('target-value').value) || 0;
+            const intervalVal = parseFloat(document.getElementById('recovery-interval').value) || 15;
+
+            // 翌0時までの残り分数
+            const elapsedMinutes = (selectedHour * 60) + selectedMinute;
+            const totalRemainingMinutes = 1440 - elapsedMinutes;
+
+            // 時間・分 表示用
+            const remHours = Math.floor(totalRemainingMinutes / 60);
+            const remMinutes = totalRemainingMinutes % 60;
+
+            // 回復予定数
+            const slots = totalRemainingMinutes / intervalVal; 
+
+            // 調整計算
+            const adjustment = targetVal - slots;
+            
+            // 結果表示の共通部分
+            document.getElementById('time-remaining').textContent = `${remHours}時間 ${remMinutes}分`;
+            document.getElementById('slots-remaining').textContent = slots.toFixed(1).replace('.0', '');
+
+            // --- 調整目安の分岐ロジック ---
+            const adjustmentTargetEl = document.getElementById('adjustment-target');
+
+            if (adjustment < 0) {
+                // マイナスの場合：溢れる時刻を逆算
+                // 目標値を満タンにするのに必要な時間(分)
+                const requiredMinutes = targetVal * intervalVal;
+                
+                // 24:00(1440分)から必要な時間を引いた時刻がリミット
+                const safeStartTotalMinutes = 1440 - requiredMinutes;
+
+                // 結果がマイナス(前日)になる場合などの処理も念の為考慮
+                // 今回は0時～24時の範囲で考える
+                let safeHour = Math.floor(safeStartTotalMinutes / 60);
+                let safeMinute = Math.floor(safeStartTotalMinutes % 60);
+
+                // 00:00より前になる場合（例：回復が遅すぎて間に合わない等）のガード
+                if (safeStartTotalMinutes < 0) {
+                    adjustmentTargetEl.textContent = `間に合いません (要調整)`;
+                } else {
+                    const safeMinuteStr = String(safeMinute).padStart(2, '0');
+                    adjustmentTargetEl.textContent = `${safeHour}:${safeMinuteStr}以降で調整してください`;
+                }
+
+            } else {
+                // プラスの場合
+                const adjustmentFormatted = adjustment.toFixed(1).replace('.0', '');
+                adjustmentTargetEl.textContent = `残り${adjustmentFormatted}に調整`;
+            }
+            
+            document.getElementById('result').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
